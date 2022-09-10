@@ -11,11 +11,12 @@ class SimpleCmd(om.MPxCommand):
 
     VERSION_FLAG = ["-v", "-version"]
     TRANSLATE_FLAG = ["-t", "-translate", (om.MSyntax.kDouble, om.MSyntax.kDouble, om.MSyntax.kDouble)]
-
+    undoable = False
+    
     def __int__(self):
         super(SimpleCmd, self).__init__()
 
-
+        self.undoable = False
 
     def doIt(self, arg_list):
 
@@ -27,30 +28,55 @@ class SimpleCmd(om.MPxCommand):
 
         selection_list = arg_db.getObjectList()
 
-        
+        self.selected_obj = selection_list.getDependNode(0)
 
-        version_flag_enabled = arg_db.isFlagSet(SimpleCmd.VERSION_FLAG[0])
-        if version_flag_enabled:
-            self.setResult("1.0.0")
-        else:
-            # name = "SimpleCmd"
-            # if arg_db.isFlagSet(SimpleCmd.NAME_FLAG[0]):
-            #     name = arg_db.flagArgumentString(SimpleCmd.NAME_FLAG[0], 0)
+        if self.selected_obj.apiType() != om.MFn.kTransform:
+            raise RuntimeError("This commands requires a transform node")
 
-            first_name = arg_db.commandArgumentString(0)
-            last_name = arg_db.commandArgumentString(1)
+        self.edit = arg_db.isEdit
+        self.query = arg_db.isQuery
 
-            self.displayInfo("Hello {0} {1}".format(first_name, last_name))
+        self.translate = arg_db.isFlagSet(SimpleCmd.TRANSLATE_FLAG[0])
+        if self.translate:
+            transform_fn = om.MFnTransform(self.selected_obj)
+            self.originalTranslation = transform_fn.translation(om.MSpace.kTransform)
 
+            if self.edit:
+                self.newTranslation = [arg_db.flagArgumentDouble(SimpleCmd.TRANSLATE_FLAG[0], 0),
+                                       arg_db.flagArgumentDouble(SimpleCmd.TRANSLATE_FLAG[0], 1),
+                                       arg_db.flagArgumentDouble(SimpleCmd.TRANSLATE_FLAG[0], 2)]
+
+                self.undoable = True
+
+        self.version = arg_db.isFlagSet(SimpleCmd.VERSION_FLAG[0])
+
+        self.redoIt()
 
     def undoIt(self):
-        pass
+        transform_fn = om.MFnTransform(self.selected_obj)
+        transform_fn.setTranslation(om.MVector(self.originalTranslation), om.MSpace.kTransform)
 
     def redoIt(self):
-        pass
+        transform_fn = om.MFnTransform(self.selected_obj)
+
+        if self.query:
+            if self.translate:
+                self.setResult(self.originalTranslation)
+            else:
+                raise RuntimeError("Flag does not support query")
+        elif self.edit:
+            if self.translate:
+                transform_fn.setTranslation(om.MVector(self.newTranslation), om.MSpace.kTransform)
+            else:
+                raise RuntimeError("RFlag does not support edit")
+
+        elif self.version:
+            self.setResult("1.0.0")
+        else:
+            self.setResult(transform_fn.name())
 
     def isUndoable(self):
-        return False
+        return self.undoable
 
     @classmethod
     def creator(cls):
@@ -61,10 +87,14 @@ class SimpleCmd(om.MPxCommand):
 
         syntax = om.MSyntax()
 
-        syntax.addFlag(SimpleCmd.VERSION_FLAG[0], SimpleCmd.VERSION_FLAG[1])
-        # syntax.addFlag(SimpleCmd.NAME_FLAG[0], SimpleCmd.NAME_FLAG[1], om.MSyntax.kString)
-        syntax.addArg(om.MSyntax.kString)
-        syntax.addArg(om.MSyntax.kString)
+        syntax.enableEdit = True
+        syntax.enableQuery = True
+
+        syntax.addFlag(*cls.TRANSLATE_FLAG)
+        syntax.addFlag(*cls.VERSION_FLAG)
+
+        syntax.setObjectType(om.MSyntax.kSelectionList, 1, 1)
+        syntax.useSelectionAsDefault(True)
         return syntax
 
 
@@ -87,7 +117,6 @@ def uninitializePlugin(plugin):
 
 
 if __name__ == "__main__":
-
     cmds.file(new=True, force=True)
 
     plugin_name = "simple_cmd.py"
